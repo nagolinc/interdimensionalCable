@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>User Prompt</title>
+    <script>
+        async function addPrompt() {
+            const promptTextArea = document.getElementById('userPrompt');
+            const prompt = promptTextArea.value;
+            const response = await fetch('/add_prompt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt })
+            });
+
+            if (response.ok) {
+                const responseData = await response.json();
+                // Update the textarea with the new generated prompt
+                promptTextArea.value = responseData.random_prompt;
+            }
+        }
+
+        function checkForEnter(event) {
+            if (event.keyCode === 13) {
+                addPrompt();
+            }
+        }
+    </script>
+</head>
+<body>
+    <textarea id="userPrompt" rows="4" cols="50" onkeydown="checkForEnter(event)"></textarea>
+    <br>
+    <button onclick="addPrompt()">Submit Prompt</button>
+    <br>
+    <button onclick="window.open('./viewer', '_blank')">Open viewer</button>
+</body>
+</html>

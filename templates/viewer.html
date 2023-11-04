@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>TV Station</title>
+    <script>
+        function playVideo() {
+            fetch('/get_media?type=video')
+                .then(res => res.json())
+                .then(data => {
+                    const video = document.getElementById('videoPlayer');
+                    video.src = data.path;
+                    video.play();
+                    document.getElementById('videoPrompt').innerHTML = data.prompt;
+                });
+        }
+
+        function playAudio() {
+            fetch('/get_media?type=audio')
+                .then(res => res.json())
+                .then(data => {
+
+                    try {
+                        const audio = document.getElementById('audioPlayer');
+                        audio.src = data.path;
+                        audio.play();
+                        document.getElementById('audioPrompt').innerHTML = data.prompt;
+                    } catch (e) {
+                        //try again
+                        console.log(e)
+                        playAudio();
+                    }
+
+                });
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            playVideo();
+            playAudio();
+            const video = document.getElementById('videoPlayer');
+            const audio = document.getElementById('audioPlayer');
+            video.addEventListener('ended', playVideo);
+            audio.addEventListener('ended', playAudio);
+        });
+    </script>
+</head>
+
+<body>
+    <video id="videoPlayer" controls></video>
+    <div id="videoPrompt"></div>
+    <br>
+    <audio id="audioPlayer" controls></audio>
+    <div id="audioPrompt"></div>
+</body>
+
+</html>
