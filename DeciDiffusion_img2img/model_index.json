@@ -1,0 +1,34 @@
+{
+  "_class_name": "DeciDiffusionPipeline_img2img",
+  "_diffusers_version": "0.20.2",
+  "_name_or_path": "Deci/DeciDiffusion-1.0",
+  "feature_extractor": [
+    "transformers",
+    "CLIPImageProcessor"
+  ],
+  "requires_safety_checker": true,
+  "safety_checker": [
+    "stable_diffusion",
+    "StableDiffusionSafetyChecker"
+  ],
+  "scheduler": [
+    "diffusers",
+    "DDIMScheduler"
+  ],
+  "text_encoder": [
+    "transformers",
+    "CLIPTextModel"
+  ],
+  "tokenizer": [
+    "transformers",
+    "CLIPTokenizer"
+  ],
+  "unet": [
+    "diffusers",
+    "UNet2DConditionModel"
+  ],
+  "vae": [
+    "diffusers",
+    "AutoencoderKL"
+  ]
+}

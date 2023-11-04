@@ -49,9 +49,12 @@ def media_generator():
     #random is getting seeded somewhere ?where? so we need to seed it here
     random.seed()
     while True:
-        # chance of generating a video
-        if random.random() < args.video_chance:
+        #check if there's any music or video in the table
+        n_music=table.count(type='audio')
+        n_video=table.count(type='video')
 
+        # chance of generating a video
+        if (random.random() < args.video_chance and n_music>0) or n_video==0:
 
             #find all prompts with status=new
             newPrompt=table.find_one(type='prompt',status='new')

@@ -91,6 +91,8 @@ deciDiffusion = None
 
 lcm_img2img = None
 
+rifeFolder="D:\\img\\ECCV2022-RIFE"
+
 
 def setup(
     _image_prompt_file="image_prompts.txt",
@@ -106,7 +108,7 @@ def setup(
     # ip_adapter_base_model="D:\\img\\auto1113\\stable-diffusion-webui\\models\\Stable-diffusion\\dreamshaperXL10_alpha2Xl10.safetensors",
     # ip_image_encoder_path = "D:\\img\\IP-Adapter\\IP-Adapter\\sdxl_models\\image_encoder",
     # ip_ckpt = "D:\\img\\IP-Adapter\\IP-Adapter\\sdxl_models\\ip-adapter_sdxl.bin",
-    #ip_adapter_base_model="D:\\img\\auto1113\\stable-diffusion-webui\\models\\Stable-diffusion\\reliberate_v20.safetensors",
+    #ip_adapter_base_model="D:\\img\\auto1113\\ciffusion-webui\\models\\Stable-diffusion\\reliberate_v20.safetensors",
     ip_adapter_base_model = "SG161222/Realistic_Vision_V4.0_noVAE",
     ip_image_encoder_path="D:\\img\\IP-Adapter\\IP-Adapter\\models\\image_encoder",
     ip_ckpt="D:\\img\\IP-Adapter\\IP-Adapter\\models\\ip-adapter-plus_sd15.bin",
@@ -384,9 +386,12 @@ def setup(
 
 
     if need_deciDiffusion:
+
+        cwd=Path.cwd()
+
         print("LOADING DECI DIFFUSION MODEL")
         deciDiffusion = StableDiffusionImg2ImgPipeline.from_pretrained('Deci/DeciDiffusion-v1-0',
-                                                   custom_pipeline='D:/img/DeciDiffusion-v1-0',
+                                                   custom_pipeline=cwd+'/DeciDiffusion_img2img',#todo fixme
                                                    torch_dtype=torch.float16
                                                    )
 
@@ -754,9 +759,8 @@ def generate_map_image(map_prompt_file="./map_prompts.txt", suffix="hand drawn m
 
 
 
-def process_video(video: str, output: str) -> None:
-    
-    command = f"python D:\\img\\ECCV2022-RIFE\\inference_video.py --exp 2 --video {video} --output {output}"
+def process_video(video: str, output: str) -> None:    
+    command = f"python {rifeFolder}\\inference_video.py --exp 2 --video {video} --output {output}"
     print("about to die",command)
     subprocess.run(command, shell=True, cwd='D:\\img\\ECCV2022-RIFE')
 
@@ -831,7 +835,7 @@ def upscaleFrames0(video_frames,prompt,width=1024,height=576,strength=0.25):
     return [np.array(x) for x in up_frames]
 
 
-def upscaleFrames1(video_frames,prompt,width=1024,height=576,strength=0.6,num_inference_steps=3):
+def upscaleFrames1(video_frames,prompt,width=1024,height=576,strength=0.4,num_inference_steps=3):
 
     global lcm_img2img
 
@@ -917,7 +921,6 @@ import hashlib
 #animDiffDir = "D:\\img\\animatediff-cli-prompt-travel"
 animDiffDir = "D:\\img\\id1"
 
-#promptFileName = "u-prompt_travel.json"
 promptFileName = "noloop_prompt_travel_multi_controlnet.json"
 
 
@@ -926,18 +929,21 @@ def generate_video_animdiff(prompt, image, output_video_path, prompt_suffix="", 
     # hash prompt to get a unique filename
     sampleFilename = hashlib.sha256(prompt.encode()).hexdigest()[:32]+".webm"
 
+
+    cwd = os.getcwd()
+
     # if the file already exists, return the filename
     if os.path.exists(f".//static//samples//{sampleFilename}"):
         return sampleFilename
 
     # save the image in <animDiffDir>/data/controlnet_images/controlnet_tile/0.png
-    image.save(animDiffDir+"/data/controlnet_image/ew/controlnet_tile/0.png")
+    image.save(cwd+"/data/controlnet_image/ew/controlnet_tile/0.png")
 
     #also hsave to controlnet_ip2p
-    image.save(animDiffDir+"/data/controlnet_image/ew/controlnet_ip2p/0.png")
+    image.save(cwd+"/data/controlnet_image/ew/controlnet_ip2p/0.png")
 
     # read the (json formatted)prompt file from <animDiffDir>/config/prompts/<promptFileName>
-    with open(animDiffDir+"/config/prompts/"+promptFileName, "r") as promptFile:
+    with open(cwd+"/config/prompts/"+promptFileName, "r") as promptFile:
         promptFileContent = promptFile.read()
         data = json.loads(promptFileContent)
 
@@ -948,10 +954,32 @@ def generate_video_animdiff(prompt, image, output_video_path, prompt_suffix="", 
     else:
         n_prompt = "(watermark:1.5), artifacts, (worst quality, low quality:1.4)"+n_prompt
 
+
+    #for each of the following, we need to replace the intial "./" with cwd
+    '''
+    data["path"]
+    data["motion_module"]
+    data["ip_adapter_map"]["input_image_dir"]
+    data["controlnet_map"]["input_image_dir"]
+    data["controlnet_map"]["controlnet_ref"]["ref_image"]
+    data["upscale_config"]["controlnet_ref"]["ref_image"]
+    '''
+    data["path"]=os.path.abspath(data["path"])
+    data["motion_module"]=os.path.abspath(data["motion_module"])
+    data["ip_adapter_map"]["input_image_dir"]=os.path.abspath(data["ip_adapter_map"]["input_image_dir"])
+    data["controlnet_map"]["input_image_dir"]=os.path.abspath(data["controlnet_map"]["input_image_dir"])
+    data["controlnet_map"]["controlnet_ref"]["ref_image"]=os.path.abspath(data["controlnet_map"]["controlnet_ref"]["ref_image"])
+    data["upscale_config"]["controlnet_ref"]["ref_image"]=os.path.abspath(data["upscale_config"]["controlnet_ref"]["ref_image"])
+
+
+
     data['n_prompt'][0] = n_prompt
 
+    #save to promptFileName_modified.json
+    modified_name=promptFileName[:-5]+"_modified.json"
+
     # write to file
-    with open(animDiffDir+"/config/prompts/"+promptFileName, "w") as promptFile:
+    with open(cwd+"/config/prompts/"+modified_name, "w") as promptFile:
         json.dump(data, promptFile, indent=4)
 
     # call animdiff
@@ -990,8 +1018,11 @@ def generate_video_animdiff(prompt, image, output_video_path, prompt_suffix="", 
 
 
     '''
-    model_name=Path("D:/img/id1/runwayml/stable-diffusion-v1-5/")
-    config_path=Path("D:/img/id1/config/prompts/noloop_prompt_travel_multi_controlnet.json")
+
+    cwd=os.getcwd()
+
+    model_name=Path(cwd+"/runwayml/stable-diffusion-v1-5/")
+    config_path=Path(cwd+"/config/prompts/"+modified_name)
     length=num_frames
     context=16
     overlap=4
@@ -1000,7 +1031,7 @@ def generate_video_animdiff(prompt, image, output_video_path, prompt_suffix="", 
     device='cuda'
     use_xformers=True
     force_half_vae=True
-    out_dir=Path("D:/img/id1/output/")
+    out_dir=Path(cwd+"/output/")
     no_frames=False
     save_merged=False
     version=False

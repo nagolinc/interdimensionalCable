@@ -1,7 +1,7 @@
 {
     "name": "sample",
-    "path": "D:/img/id1/data/models/DreamBooth_LoRA/reliberate_v10.safetensors",
-    "motion_module": "D:/img/id1/data/models\\Motion-module\\improved3DMotion_improved3DV1.ckpt",
+    "path": "./data/models/DreamBooth_LoRA/reliberate_v10.safetensors",
+    "motion_module": "./data/models\\Motion-module\\improved3DMotion_improved3DV1.ckpt",
     "compile": false,
     "seed": [
         341774366206100
@@ -22,7 +22,7 @@
     },
     "ip_adapter_map": {
         "enable": true,
-        "input_image_dir": "D:/img/id1/data/ip_adapter_image/test",
+        "input_image_dir": "./data/ip_adapter_image/test",
         "save_input_image": true,
         "resized_to_square": false,
         "scale": 0.5,
@@ -30,7 +30,7 @@
         "is_plus": true
     },
     "controlnet_map": {
-        "input_image_dir": "D:/img/id1/data/controlnet_image/ew",
+        "input_image_dir": "./data/controlnet_image/ew",
         "max_samples_on_vram": 200,
         "max_models_on_vram": 3,
         "save_detectmap": true,
@@ -237,7 +237,7 @@
         },
         "controlnet_ref": {
             "enable": false,
-            "ref_image": "D:/img/id1/data/ref_image/ref_sample.png",
+            "ref_image": "./data/ref_image/ref_sample.png",
             "attention_auto_machine_weight": 0.3,
             "gn_auto_machine_weight": 0.3,
             "style_fidelity": 0.5,
@@ -278,7 +278,7 @@
             "enable": false,
             "use_frame_as_ref_image": false,
             "use_1st_frame_as_ref_image": true,
-            "ref_image": "D:/img/id1/data/ref_image/path_to_your_ref_img.jpg",
+            "ref_image": "./data/ref_image/path_to_your_ref_img.jpg",
             "attention_auto_machine_weight": 1.0,
             "gn_auto_machine_weight": 1.0,
             "style_fidelity": 0.25,
