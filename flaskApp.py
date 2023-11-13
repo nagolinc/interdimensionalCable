@@ -13,13 +13,15 @@ import argparse
 import subprocess
 
 
-from generation_functions import setup, create_prompt, generate_video, generate_music, generate_image, generate_video_animdiff
+from generation_functions import setup, create_prompt, generate_video, generate_music, generate_image, generate_video_animdiff, generate_video_camera_transforms
 
 from threading import Lock
 
 import numpy as np
 
 import json
+
+import shutil
 
 generate_image_lock = Lock()
 text_generation_lock = Lock()
@@ -45,7 +47,11 @@ if not db['media'].count(type='prompt'):
         table.insert(dict(type='prompt', prompt=prompt))
 
 
+lastPrompt=None
+lastPromptCount=0
+
 def media_generator():
+    global lastPrompt
     #random is getting seeded somewhere ?where? so we need to seed it here
     random.seed()
     while True:
@@ -53,69 +59,85 @@ def media_generator():
         n_music=table.count(type='audio')
         n_video=table.count(type='video')
 
+
+        #count how many new videos we already have stored
+        new_videos_stored=table.count(type='video',status='new')
+        print("NEW VIDEOS STORED",new_videos_stored)
+
         # chance of generating a video
-        if (random.random() < args.video_chance and n_music>0) or n_video==0:
+        if new_videos_stored<10 and ((random.random() < args.video_chance and n_music>0) or n_video==0):
 
-            #find all prompts with status=new
-            newPrompt=table.find_one(type='prompt',status='new')
 
-            #if not prompt_queue.empty():
-            #    prompt = prompt_queue.get()
-            if newPrompt:
-                prompt=newPrompt['prompt']
-                print("Got prompt:", prompt)
-                # add to database
-                #table.insert(dict(type='prompt', prompt=prompt))
-                #update status to old
-                table.update(dict(type='prompt', prompt=prompt,status='old'),['type','prompt'])
-
+            if lastPrompt is not None and lastPromptCount<args.prompt_persistence:
+                print("USING LAST PROMPT",lastPrompt)
+                prompt = lastPrompt
+                lastPromptCount+=1
             else:
-                # random_prompt = random.choice(sample_prompts)
-                # choose 5 random prompts from database
-                statement = """
-                SELECT * FROM media
-                WHERE user_created=1
-                ORDER BY RANDOM()
-                LIMIT 5;        
-                """
-                gotPrompts = [x['prompt'] for x in db.query(statement)]
-                #fallback if there are no user created prompts
-                if len(gotPrompts)<5:
+                lastPromptCount=1
+
+                #find all prompts with status=new
+                newPrompt=table.find_one(type='prompt',status='new')
+
+                #if not prompt_queue.empty():
+                #    prompt = prompt_queue.get()
+                if newPrompt:
+                    prompt=newPrompt['prompt']
+                    print("Got prompt:", prompt)
+                    # add to database
+                    #table.insert(dict(type='prompt', prompt=prompt))
+                    #update status to old
+                    table.update(dict(type='prompt', prompt=prompt,status='old'),['type','prompt'])
+
+                    print("found new prompt",prompt)
+
+                else:
+                    # random_prompt = random.choice(sample_prompts)
+                    # choose 5 random prompts from database
                     statement = """
-                SELECT * FROM media
-                ORDER BY RANDOM()
-                LIMIT 5;        
-                """
-                    gotPrompts += [x['prompt'] for x in db.query(statement)] 
+                    SELECT * FROM media
+                    WHERE user_created=1
+                    ORDER BY RANDOM()
+                    LIMIT 5;        
+                    """
+                    gotPrompts = [x['prompt'] for x in db.query(statement)]
+                    #fallback if there are no user created prompts
+                    if len(gotPrompts)<5:
+                        statement = """
+                    SELECT * FROM media
+                    ORDER BY RANDOM()
+                    LIMIT 5;        
+                    """
+                        gotPrompts += [x['prompt'] for x in db.query(statement)] 
 
 
-                print("Got prompts:", gotPrompts)
+                    print("Got prompts:", gotPrompts)
 
-                with text_generation_lock:
-                    random.seed()#apparently dataset is doing it?
-                    #use prompt suppliment
-                    prompt_suppliment=""
-                    for prompt_suppliments in all_prompt_suppliments:
-                        #prompt_suppliment += random.choice(list(prompt_suppliments.keys()))
-                        l=list(prompt_suppliments.keys())
-                        index=random.randint(0,len(l)-1)
-                        print("index",index)
-                        to_add= l[index]
-                        print("to_add",to_add)
-                        prompt_suppliment += to_add
-                        prompt_suppliment += " "
+                    with text_generation_lock:
+                        random.seed()#apparently dataset is doing it?
+                        #use prompt suppliment
+                        prompt_suppliment=""
+                        for prompt_suppliments in all_prompt_suppliments:
+                            #prompt_suppliment += random.choice(list(prompt_suppliments.keys()))
+                            l=list(prompt_suppliments.keys())
+                            index=random.randint(0,len(l)-1)
+                            print("index",index)
+                            to_add= l[index]
+                            print("to_add",to_add)
+                            prompt_suppliment += to_add
+                            prompt_suppliment += ", "
 
-                    print("prompt_suppliment",prompt_suppliment)
+                        print("prompt_suppliment",prompt_suppliment)
 
-                    #remove last space
-                    prompt_suppliment=prompt_suppliment.strip()
+                        #remove last space
+                        prompt_suppliment=prompt_suppliment.strip()
 
+                        prompt = create_prompt(gotPrompts,prompt_hint=args.prompt_hint,prompt_suppliment=prompt_suppliment)
 
-                    prompt = create_prompt(gotPrompts,
-                                           prompt_hint=args.prompt_hint,
-                                           prompt_suppliment=prompt_suppliment
-                                           )
-                print("Generated prompt:", prompt)
+                    print("Generated prompt:", prompt)
+
+                #set last prompt
+                lastPrompt=prompt
+
 
             # let's create a unique filename based off of datetime and the prompt
             # replace non alphanumeric in prompt with _ and trim to 100 chars
@@ -126,6 +148,7 @@ def media_generator():
             temp_video_path = f"./static/samples/temp_video.mp4"
             video_path = f"./static/samples/{prompt_filename}_video.mp4"
 
+                
 
 
             if args.use_animdiff:
@@ -145,7 +168,9 @@ def media_generator():
                     #filename = generateGif(prompt, image, prompt_suffix="", n_prompt=None, num_frames=16,do_upscale=True,width=576,height=320)
                     #video_path = f"./static/samples/{filename}"
 
-                    temp_video_path_up = generate_video_animdiff(prompt, 
+                    #temp_video_path_up = generate_video_animdiff(
+                    temp_video_path_up = generate_video_camera_transforms(
+                                                                 prompt, 
                                                                  image, 
                                                                  temp_video_path, 
                                                                  prompt_suffix="", 
@@ -156,16 +181,20 @@ def media_generator():
                                                                  height=args.movie_size[1],
                                                                  upscale_size=args.video_upscale_size)
 
-                    # Re-encode the video using FFmpeg
-                    cmd = [
-                        'ffmpeg', 
-                        '-i', temp_video_path_up, 
-                        '-c:v', 'libx264', 
-                        '-c:a', 'aac', 
-                        '-strict', 'experimental',
-                        video_path
-                    ]
-                    subprocess.run(cmd)
+                    if args.mustReencode:
+                        # Re-encode the video using FFmpeg
+                        cmd = [
+                            'ffmpeg', 
+                            '-i', temp_video_path_up, 
+                            '-c:v', 'libx264', 
+                            '-c:a', 'aac', 
+                            '-strict', 'experimental',
+                            video_path
+                        ]
+                        subprocess.run(cmd)
+                    else:
+                        #just copy
+                        shutil.copy(temp_video_path_up,video_path)
                 
             else:
                 print("Generating video")
@@ -248,15 +277,21 @@ def get_media():
     global shown_clips
     media_type = request.args.get('type')
 
-    
-    #first check if there are any new clips
-    new_clip=table.find_one(type=media_type,status='new')
+    #first check if there are any new clips (make sure we are consuming them in order)
+    new_clip=table.find_one(type=media_type,status='new',order_by='id')
     if new_clip:
         item = new_clip
         #update status
         table.update(dict(type=media_type, path=item['path'], prompt=item['prompt'],status='old'),['type','path','prompt'])
+        return jsonify({'path': item['path'], 'prompt': item['prompt']}), 200
 
-    else:
+    #get most recent if args.always_get_recent_video
+    if media_type=='video' and args.always_get_recent_video:
+        item = table.find_one(type=media_type,order_by='-id')
+        if item:
+            return jsonify({'path': item['path'], 'prompt': item['prompt']}), 200    
+
+    if True:
         #seed random (ugh)
         random.seed()
         #choose between geometric distribution and shuffle
@@ -372,6 +407,16 @@ if __name__ == '__main__':
     #choose recent clip chance
     parser.add_argument('--choose_recent_clip_chance', type=float, default=0.25)
 
+    #always get recent video
+    parser.add_argument('--always_get_recent_video', action='store_true')
+
+    #prompt persistence (how many times to repeat the same prompt)
+    parser.add_argument('--prompt_persistence', type=int, default=1)
+
+    #args.mustReencode (let's have a flat to set this false)
+    parser.add_argument('--donotreencode', dest='mustReencode', action='store_false')
+    
+
 
     args = parser.parse_args()
 
@@ -400,11 +445,11 @@ if __name__ == '__main__':
         setup(
             model_id=args.model_id,
             need_txt2img=need_txt2img,
-            need_img2img=True,
+            need_img2img=False,
             need_ipAdapter=False,
             need_music=True,
             need_video=need_video,
-            need_llm=True,
+            need_llm=False,#we'll use vllm
             need_deciDiffusion=False,
             need_lcm_img2img=True
         )

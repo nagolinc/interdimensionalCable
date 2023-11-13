@@ -1,8 +1,12 @@
 import sys
 sys.path.append("D:\\img\\IP-Adapter\\")
+sys.path.append("D:/img")
+
+from rife_inference_video import interpolate_video
 
 
 from diffusers import StableDiffusionPipeline, UniPCMultistepScheduler, StableDiffusionImg2ImgPipeline, DiffusionPipeline, AutoencoderKL, StableDiffusionXLImg2ImgPipeline, StableDiffusionXLPipeline, AutoencoderTiny, DDIMInverseScheduler, DDIMScheduler
+from diffusers import AutoPipelineForText2Image, AutoPipelineForImage2Image, AutoencoderTiny
 import hashlib
 import os
 import uuid
@@ -23,7 +27,6 @@ import animateDiff_generate
 from pathlib import Path
 
 import json
-
 
 
 from diffusers import DiffusionPipeline, DPMSolverMultistepScheduler
@@ -80,7 +83,7 @@ ip_model = None
 
 ip_xl = False
 
-do_save_memory = True
+do_save_memory = False
 
 chatbot = None
 
@@ -170,8 +173,8 @@ def setup(
 
             vae = AutoencoderKL.from_pretrained("stabilityai/sdxl-vae")
             pipe.enable_vae_tiling()
-            #pipe.vae = AutoencoderTiny.from_pretrained(
-            #    "madebyollin/taesdxl", torch_dtype=torch.float16)
+            pipe.vae = AutoencoderTiny.from_pretrained(
+                "madebyollin/taesdxl", torch_dtype=torch.float16)
 
             # img2img = StableDiffusionXLImg2ImgPipeline.from_pretrained(
             #    "stabilityai/stable-diffusion-xl-refiner-1.0", torch_dtype=torch.float16, variant="fp16", use_safetensors=True
@@ -194,8 +197,7 @@ def setup(
             
 
         else:
-            print("LOADING IMG2iMG MODEL")
-
+            
             # check if vae is None
             if vaeModel is not None:
                 vae = AutoencoderKL.from_pretrained(
@@ -218,6 +220,10 @@ def setup(
             pipe.safety_checker = None
             tomesd.apply_patch(pipe, ratio=0.5)
 
+            #use taesd
+            pipe.vae=AutoencoderTiny.from_pretrained(
+                "madebyollin/taesd", torch_dtype=torch.float16)
+
             if vae is not None:
                 pipe.vae = vae
 
@@ -230,6 +236,8 @@ def setup(
 
 
         if need_img2img:
+            print("LOADING IMG2iMG MODEL")
+
 
             dummy_path = "runwayml/stable-diffusion-v1-5"
 
@@ -411,9 +419,24 @@ def setup(
 
     global lcm_img2img
     if need_lcm_img2img:
-        lcm_img2img = DiffusionPipeline.from_pretrained("SimianLuo/LCM_Dreamshaper_v7", custom_pipeline="latent_consistency_img2img")
+
+        print("LOADING LCM IMG2IMG MODEL")
+
+        '''lcm_img2img = DiffusionPipeline.from_pretrained("SimianLuo/LCM_Dreamshaper_v7", custom_pipeline="latent_consistency_img2img")
         # To save GPU memory, torch.float16 can be used, but it may compromise image quality.
         lcm_img2img.safety_checker = None
+        '''
+        tmppipe = AutoPipelineForText2Image.from_pretrained("SimianLuo/LCM_Dreamshaper_v7")
+        lcm_img2img = AutoPipelineForImage2Image.from_pipe(tmppipe)
+        lcm_img2img.safety_checker = None
+        del tmppipe
+
+        lcm_img2img = lcm_img2img.to('cuda', torch_dtype=torch.float16)#need it to be float16 (to match vae)
+
+        lcm_img2img.vae = AutoencoderTiny.from_pretrained(
+            "madebyollin/taesd", torch_dtype=torch.float16)
+        
+
         if do_save_memory:
             #lcm_img2img = lcm_img2img.to('cpu', torch_dtype=torch.float32)
             lcm_img2img = lcm_img2img.to('cpu', torch_dtype=torch.float16)
@@ -423,6 +446,9 @@ def setup(
 
 
 def generate_music(description, duration=8, save_dir="./static/samples"):
+
+    description="beautiful music, pleasant calming melody, "+description
+
     text2music.set_generation_params(duration=duration)
     wav = text2music.generate([description])
     sample_rate = 32000
@@ -459,26 +485,6 @@ def generate_attributes(level):
     return attribute_values
 
 
-def generate_attacks(level, attributes):
-    num_attacks = random.randint(1, 3)
-    attacks = []
-
-    for _ in range(num_attacks):
-        prompt = generate_prompt(attack_names_template)
-        # Generate another prompt for the attack description
-        description = generate_prompt(descriptions_template)
-        # You can adjust the damage calculation based on attributes if desired
-        damage = random.randint(1, level * 2)
-
-        attack = {
-            "name": prompt,
-            "description": description,
-            "damage": damage
-        }
-
-        attacks.append(attack)
-
-    return attacks
 
 
 def generate_level_and_rarity(level=None):
@@ -605,164 +611,19 @@ def upscale_image(image, prompt,
     return img2
 
 
-def generate_prompt(template_file, kwargs=None, max_new_tokens=60):
-
-    global llm, use_llama
-
-    template = open(template_file, "r").read()
-
-    # find {TEXT} in template and replace with generated text
-    if "{TEXT}" in template:
-        index = template.find("{TEXT}")
-        template = template[:index]+"\n"
-
-    # formate template using kwargs
-    if kwargs is not None:
-        template = template.format(**kwargs)
-
-    # print("huh?",template,kwargs)
-
-    # strip whitespace (for luck)
-    template = template.strip()
-
-    if use_llama:
-        # move llm to cuda
-        # llm = llm.cuda()
-        # llm.cuda()#doesn't work, don't know why... ignore for now
-
-        # generate text
-        result = llm(template,
-                     max_new_tokens=max_new_tokens,
-                     do_sample=True,
-                     num_beams=2,
-                     no_repeat_ngram_size=12,
-                     temperature=2.0)
-        start_index = template.rfind(":")
-
-        generated_text = result[0]['generated_text'][start_index+1:]
-
-        print("got text", result[0]['generated_text'])
-
-        # move to cpu and clear cache
-        # llm = llm.to("cpu")
-        # llm.cpu()
-        gc.collect()
-        torch.cuda.empty_cache()
-
-    else:
-        inputs = tokenizer(template, return_tensors="pt", return_attention_mask=False)
-        #move inputs to cuda
-        inputs['input_ids']=inputs['input_ids'].to('cuda')
-        amt = inputs['input_ids'].shape[1]
-        outputs = text_generator.generate(**inputs, 
-                                          max_length=amt+cfg["genTextAmount_max"],
-                                          do_sample=True, temperature=0.2, top_p=0.9, use_cache=True, repetition_penalty=1.2, eos_token_id=tokenizer.eos_token_id)
-        _generated_text = tokenizer.batch_decode(outputs)[0]
-        start_index = template.rfind(":")
-        generated_text = _generated_text[start_index+1:]
-
-        #get rid of <|endoftext|>
-        generated_text=generated_text.replace("<|endoftext|>","")
-
-        '''
-
-        inputs = tokenizer(
-            template, return_tensors="pt")
-        
-        
-        input_ids=inputs.input_ids
-        amt = input_ids.shape[1]
-
-        
-
-        generated_text = text_generator.generate(
-            inputs,
-            do_sample=True,
-            min_length=amt+cfg["genTextAmount_min"],
-            max_length=amt+cfg["genTextAmount_max"],
-            #return_full_text=False,
-            no_repeat_ngram_size=cfg["no_repeat_ngram_size"],
-            repetition_penalty=cfg["repetition_penalty"],
-            num_beams=cfg["num_beams"],
-            temperature=cfg["temperature"]
-        )[0]["generated_text"]
-
-        
-
-        outputs = text_generator.generate(**inputs, max_length=amt+cfg["genTextAmount_min"], do_sample=True, temperature=0.2, top_p=0.9, use_cache=True, repetition_penalty=1.2, eos_token_id=tokenizer.eos_token_id)
-        generated_text = tokenizer.batch_decode(outputs)[0]
-
-        '''
-        
-        
-        
-
-    # prompt is first non empty line w/o colon
-    new_prompt = "default prompt"
-    lines = generated_text.split("\n")
-    for line in lines:
-        if len(line.strip()) > 0 and ":" not in line:
-            new_prompt = line
-            break
-
-    if new_prompt == "default prompt":
-        print("WARNING: no prompt generated")
-        new_prompt = generated_text
-
-    # print(template,"\n==\n",generated_text,"\n==\n",new_prompt)
-
-    return new_prompt
-
 
 def hash(s):
     sha256_hash = hashlib.sha256(s.encode('utf-8')).hexdigest()
     return sha256_hash
 
 
-def generate_card(num_inference_steps=15, prompt_suffix=", close up headshot, anime portrait, masterpiece", level=None):
-    level, rarity = generate_level_and_rarity(level=level)
-    attributes = generate_attributes(level)
-    prompt = generate_prompt(image_prompt_file)
-    image = generate_image(
-        prompt, num_inference_steps=num_inference_steps, prompt_suffix=prompt_suffix)
-    # hash prompt to get filename
-    image_file_name = "./static/images/"+hash(prompt)+".png"
-    image.save(image_file_name)
-    # attacks = generate_attacks(level, attributes)
-    attacks = []
-
-    card = {"level": level,
-            "rarity": rarity,
-            "attributes": attributes,
-            "image": image_file_name,
-            "attacks": attacks,
-            "description": prompt}
-
-    return card
 
 
-def generate_background_image(background_prompt_file="./background_prompts.txt", suffix="high quality landscape painting"):
-    prompt = generate_prompt(background_prompt_file)
-    image = generate_image(prompt, width=768, height=512, prompt_suffix=suffix)
-    image_file_name = "./static/images/"+hash(prompt)+".png"
-    image.save(image_file_name)
-    return {"description": prompt, "image": image_file_name}
-
-
-def generate_map_image(map_prompt_file="./map_prompts.txt", suffix="hand drawn map, detailed, full color"):
-    prompt = generate_prompt(map_prompt_file)
-    image = generate_image(prompt, width=768, height=512, prompt_suffix=suffix)
-    image_file_name = "./static/images/"+hash(prompt)+".png"
-    image.save(image_file_name)
-    return {"description": prompt, "image": image_file_name}
-
-
-
-
-def process_video(video: str, output: str) -> None:    
-    command = f"python {rifeFolder}\\inference_video.py --exp 2 --video {video} --output {output}"
-    print("about to die",command)
-    subprocess.run(command, shell=True, cwd='D:\\img\\ECCV2022-RIFE')
+def process_video(video: str, output: str,exp=2) -> None:    
+    #command = f"python {rifeFolder}\\inference_video.py --exp 2 --video {video} --output {output}"
+    #print("about to die",command)
+    #subprocess.run(command, shell=True, cwd='D:\\img\\ECCV2022-RIFE')
+    interpolate_video(video,output,exp=exp)
 
 
 def generate_video(prompt,output_video_path,upscale=True,base_fps=4):
@@ -835,7 +696,7 @@ def upscaleFrames0(video_frames,prompt,width=1024,height=576,strength=0.25):
     return [np.array(x) for x in up_frames]
 
 
-def upscaleFrames1(video_frames,prompt,width=1024,height=576,strength=0.4,num_inference_steps=3):
+def upscaleFrames1(video_frames,prompt,width=1024,height=576,strength=0.6,num_inference_steps=3):
 
     global lcm_img2img
 
@@ -847,7 +708,12 @@ def upscaleFrames1(video_frames,prompt,width=1024,height=576,strength=0.4,num_in
     prompt+=", high resolution, detailed, 8k"
 
     video = [Image.fromarray(frame).resize((width, height)) for frame in video_frames]
-    up_frames=[lcm_img2img(prompt=prompt,image=frame,strength=strength,num_inference_steps=num_inference_steps).images[0] for frame in video]
+    up_frames=[lcm_img2img(
+        prompt=prompt,
+        image=frame,
+        strength=strength,
+        num_inference_steps=num_inference_steps
+        ).images[0] for frame in video]
 
     if do_save_memory:
         lcm_img2img = lcm_img2img.to('cpu')
@@ -857,7 +723,7 @@ def upscaleFrames1(video_frames,prompt,width=1024,height=576,strength=0.4,num_in
     return [np.array(x) for x in up_frames]
 
 
-def upscaleFrames(video_frames,prompt,width=1024,height=576,strength=0.5,num_inference_steps=10):
+def upscaleFrames(video_frames,prompt,width=1024,height=576,strength=0.6,num_inference_steps=10):
 
     global img2img
 
@@ -871,7 +737,13 @@ def upscaleFrames(video_frames,prompt,width=1024,height=576,strength=0.5,num_inf
     n_prompt="low resolution, blurry"
 
     video = [Image.fromarray(frame).resize((width, height)) for frame in video_frames]
-    up_frames=[img2img(prompt=prompt,negative_prompt=n_prompt,image=frame,strength=strength,num_inference_steps=num_inference_steps).images[0] for frame in video]
+    up_frames=[img2img(
+        prompt=prompt,
+        #negative_prompt=n_prompt,
+        image=frame,
+        strength=strength,
+        num_inference_steps=num_inference_steps
+        ).images[0] for frame in video]
 
     if do_save_memory:
         img2img = img2img.to('cpu')
@@ -882,6 +754,52 @@ def upscaleFrames(video_frames,prompt,width=1024,height=576,strength=0.5,num_inf
 
 
 
+def text_completion0(prompt,max_tokens=60):
+    response=llm(
+            prompt,
+            repeat_penalty=1.2,
+            stop=["\n"],
+            max_tokens=max_tokens
+        )
+    
+    outputText = response['choices'][0]['text']
+
+    return outputText
+
+
+import requests
+
+def text_completion(prompt,max_tokens=60,stop_tokens=["\n"]):
+    # Define the URL and payload
+    url = 'http://localhost:8000/generate'
+    payload = {
+        "prompt": prompt,
+        "use_beam_search": True,
+        "n": 4,
+        "temperature": 0,
+        "stop":stop_tokens,
+        "max_tokens": max_tokens,
+    }
+
+    # Send POST request
+    response = requests.post(url, json=payload)
+
+    # Check if the request was successful
+    if response.ok:
+        #print('Response:', response.json())
+        pass
+    else:
+        print('Failed to get response. Status code:', response.status_code)
+
+    
+
+    outputText = response.json()['text'][0]#why does vllm have a different format?
+
+    #apparently this includes our prompt, so trim it
+    outputText=outputText[len(prompt):]
+
+    return outputText
+
 
 def create_prompt(prompts,max_tokens=60,prompt_hint="",prompt_suppliment=""):
 
@@ -889,20 +807,19 @@ def create_prompt(prompts,max_tokens=60,prompt_hint="",prompt_suppliment=""):
     for prompt in prompts:
         s+="DESCRIPTION:\n"+prompt+"\n"
     
+    
+    s+="\n> MAKE SURE YOUR DESCRIPTION CONTAINS THE FOLLOWING WORDS: "+prompt_suppliment+"\n"
+
     s+="DESCRIPTION:\n"
 
-    s+=prompt_suppliment
+    
 
     print("PROMPT",s)
 
-    response = llm(
-            s,
-            repeat_penalty=1.2,
-            stop=["\n"],
-            max_tokens=max_tokens
-        )
+    outputText = text_completion(s,max_tokens=max_tokens)
 
-    outputText = prompt_suppliment + response['choices'][0]['text']
+    #add prompt suppliment
+    outputText= outputText
 
     print("OUTPUT",outputText)
 
@@ -922,6 +839,136 @@ import hashlib
 animDiffDir = "D:\\img\\id1"
 
 promptFileName = "noloop_prompt_travel_multi_controlnet.json"
+
+
+
+def camera_transform(image_path, frames=8, zoom_percent=0.33, motion=None):
+    # Read the image using OpenCV and convert to RGB
+    image = cv2.imread(image_path)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    original_height, original_width = image.shape[:2]
+    mid_x, mid_y = original_width // 2, original_height // 2
+
+    # Default motion to a random choice if None
+    if motion is None:
+        motions = ["zoom_in", "zoom_out", "pan_left", "pan_right", "pan_up", "pan_down"]
+        motion = random.choice(motions)
+
+    #generate a random point (that is not too close to the edge, this depends on zoom_percent)
+    random_x0 = (random.random()*(1-zoom_percent)+zoom_percent/2)*original_width
+    random_y0 = (random.random()*(1-zoom_percent)+zoom_percent/2)*original_height
+    random_x1 = (random.random()*(1-zoom_percent)+zoom_percent/2)*original_width
+    random_y1 = (random.random()*(1-zoom_percent)+zoom_percent/2)*original_height
+
+    # Define initial and final states for different motions
+    motion_states = {
+        "zoom_in": ((mid_x, mid_y, 1), (mid_x, mid_y, zoom_percent)),
+        "zoom_in_random": ((mid_x, mid_y, 1), (random_x0, random_y0, zoom_percent)),
+        "zoom_out": ((mid_x, mid_y, zoom_percent), (mid_x, mid_y, 1)),
+        "zoom_out_random": ((random_x0, random_y0, zoom_percent), (mid_x, mid_y, 1)),
+        "pan_left": ((original_width - original_width * zoom_percent / 2, mid_y, zoom_percent), 
+                     (original_width * zoom_percent / 2, mid_y, zoom_percent)),
+        "pan_right": ((original_width * zoom_percent / 2, mid_y, zoom_percent), 
+                      (original_width - original_width * zoom_percent / 2, mid_y, zoom_percent)),
+        "pan_up": ((mid_x, original_height - original_height * zoom_percent / 2, zoom_percent), 
+                   (mid_x, original_height * zoom_percent / 2, zoom_percent)),
+        "pan_down": ((mid_x, original_height * zoom_percent / 2, zoom_percent), 
+                     (mid_x, original_height - original_height * zoom_percent / 2, zoom_percent)),
+        "pan_random": ((random_x0, random_y0, zoom_percent),(random_x1, random_y1, zoom_percent))
+    }
+
+    init_state, final_state = motion_states[motion]
+
+    transformed_images = []
+
+    # Interpolate and create each frame
+    for frame in range(frames):
+        # Interpolate tx, ty, and s
+        tx, ty, s = [np.interp(frame, [0, frames - 1], [init_state[i], final_state[i]]) for i in range(3)]
+
+        # Calculate size of the cropped area
+        crop_width, crop_height = int(original_width * s), int(original_height * s)
+
+        
+        # Calculate start and end positions for cropping
+        start_x = int(tx - crop_width / 2)
+        start_y = int(ty - crop_height / 2)
+        end_x = start_x + crop_width
+        end_y = start_y + crop_height
+
+        #make sure start and end are in-bounds
+        if start_x<0 or start_y<0 or end_x>original_width or end_y>original_height:
+            print("THIS SHOULD NEVER HAPPEN!",motion,random_x0,random_y0,random_x1,random_y1)
+            start_x = 0
+            start_y = 0
+            end_x = original_width
+            end_y = original_height
+
+
+        # Crop and resize to original size
+        cropped_img = image[start_y:end_y, start_x:end_x]
+        resized_img = cv2.resize(cropped_img, (original_width, original_height), interpolation=cv2.INTER_LINEAR)
+
+        # Convert to PIL Image and add to list
+        pil_img = Image.fromarray(resized_img)
+        transformed_images.append(pil_img)
+
+    return transformed_images
+
+
+def generate_video_camera_transforms(prompt, image, output_video_path, prompt_suffix="", n_prompt=None, num_frames=8,do_upscale=True,width=512,height=512, upscale_size=[1024,576],base_fps=2):
+
+    global lcm_img2img
+
+    #save img to tmp
+    image.save("static/samples/temp.png")
+
+    motion = random.choice(["zoom_in", "zoom_out", "zoom_in_random", "zoom_out_random", "pan_random",
+                            "pan_left", "pan_right", "pan_up", "pan_down"])
+    if motion in ["zoom_in", "zoom_out", "zoom_in_random", "zoom_out_random"]:
+        zoom_percent = 0.33
+    else:
+        zoom_percent = 0.66
+
+    #frames
+    frames=camera_transform("static/samples/temp.png",frames=num_frames,zoom_percent=zoom_percent,motion=motion)
+
+    #resize frames
+    frames = [frame.resize((upscale_size[0], upscale_size[1] ), Image.LANCZOS) for frame in frames]
+
+    #upscale
+    if do_upscale:
+        if do_save_memory:
+            lcm_img2img = lcm_img2img.to('cuda')
+        
+        upframes=lcm_img2img(
+                            [prompt]*num_frames,
+                            frames,
+                            width=upscale_size[0],
+                            height=upscale_size[1],
+                            strength=0.5,
+                            num_inference_steps=2
+                            ).images
+
+        if do_save_memory:
+            lcm_img2img = lcm_img2img.to('cpu')
+            gc.collect()
+            torch.cuda.empty_cache()
+
+    #interpolate
+    output_video_path = os.path.abspath(output_video_path)
+    output_video_path_up=output_video_path[:-4]+"_up.mp4"
+
+    video_frames=[np.array(x) for x in upframes]
+
+    #save
+    video_path = export_to_video(video_frames,output_video_path,fps=base_fps)
+    #upscale
+    process_video(output_video_path,output_video_path_up,exp=3)
+
+    return output_video_path_up
+
+
 
 
 def generate_video_animdiff(prompt, image, output_video_path, prompt_suffix="", n_prompt=None, num_frames=8,do_upscale=True,width=512,height=512, upscale_size=[1024,576],base_fps=4):
@@ -1024,7 +1071,7 @@ def generate_video_animdiff(prompt, image, output_video_path, prompt_suffix="", 
     model_name=Path(cwd+"/runwayml/stable-diffusion-v1-5/")
     config_path=Path(cwd+"/config/prompts/"+modified_name)
     length=num_frames
-    context=16
+    context=min(num_frames,16)
     overlap=4
     stride = 0
     repeats=1

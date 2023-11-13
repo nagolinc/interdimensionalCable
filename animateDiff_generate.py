@@ -53,6 +53,8 @@ from animatediff.utils.util import (extract_frames, is_v2_motion_module,
                                     set_tensor_interpolation_method)
 from animatediff.utils.wild_card import replace_wild_card
 
+from diffusers import LCMScheduler
+
 cli: typer.Typer = typer.Typer(
     context_settings=dict(help_option_names=["-h", "--help"]),
     rich_markup_mode="rich",
@@ -338,6 +340,20 @@ def generate(
             use_xformers=use_xformers,
         )
         last_model_path = model_config.path.resolve()
+
+        print("here",g_pipeline,dir(g_pipeline))
+
+        g_pipeline.scheduler = LCMScheduler(
+            beta_start=0.00085,
+            beta_end=0.012,
+            beta_schedule="scaled_linear",
+            clip_sample=False,
+            set_alpha_to_one=False,
+        )
+
+
+
+
     else:
         logger.info("Pipeline already loaded, skipping initialization")
         # reload TIs; create_pipeline does this for us, but they may have changed
