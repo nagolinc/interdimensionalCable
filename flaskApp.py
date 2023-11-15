@@ -37,18 +37,13 @@ table = db['media']
 sample_prompts = ["high resolution painting of a beautiful sunset over a gentle lake",
                   "a photograph of a calming forest filled with trees and a river",
                   "a painting of a beautiful beach with waves crashing on the shore",
+                  "high resolution video of a bee hive with bees flying in and out",
+                  "bears playing poker"
                   ]
-
-# check if database is empty
-if not db['media'].count(type='prompt'):
-    print("Database is empty, adding sample prompts")
-    # write sample prompts to database
-    for prompt in sample_prompts:
-        table.insert(dict(type='prompt', prompt=prompt))
-
 
 lastPrompt=None
 lastPromptCount=0
+promptPersistence=1
 
 def media_generator():
     global lastPrompt
@@ -68,7 +63,7 @@ def media_generator():
         if new_videos_stored<10 and ((random.random() < args.video_chance and n_music>0) or n_video==0):
 
 
-            if lastPrompt is not None and lastPromptCount<args.prompt_persistence:
+            if lastPrompt is not None and lastPromptCount<promptPersistence:
                 print("USING LAST PROMPT",lastPrompt)
                 prompt = lastPrompt
                 lastPromptCount+=1
@@ -81,6 +76,11 @@ def media_generator():
                 #if not prompt_queue.empty():
                 #    prompt = prompt_queue.get()
                 if newPrompt:
+
+                    print("GETTING PROMPT FROM DATABASE")
+
+                    promptPersistence=args.prompt_persistence*2#we want to use hand picked prompts more often
+
                     prompt=newPrompt['prompt']
                     print("Got prompt:", prompt)
                     # add to database
@@ -91,6 +91,8 @@ def media_generator():
                     print("found new prompt",prompt)
 
                 else:
+                    print("GENERATING RANDOM PROMPT")
+                    promptPersistence=args.prompt_persistence
                     # random_prompt = random.choice(sample_prompts)
                     # choose 5 random prompts from database
                     statement = """
@@ -102,12 +104,7 @@ def media_generator():
                     gotPrompts = [x['prompt'] for x in db.query(statement)]
                     #fallback if there are no user created prompts
                     if len(gotPrompts)<5:
-                        statement = """
-                    SELECT * FROM media
-                    ORDER BY RANDOM()
-                    LIMIT 5;        
-                    """
-                        gotPrompts += [x['prompt'] for x in db.query(statement)] 
+                        gotPrompts += sample_prompts
 
 
                     print("Got prompts:", gotPrompts)
@@ -125,6 +122,8 @@ def media_generator():
                             print("to_add",to_add)
                             prompt_suppliment += to_add
                             prompt_suppliment += ", "
+                        #remove last comma
+                        prompt_suppliment=prompt_suppliment[:-2]
 
                         print("prompt_suppliment",prompt_suppliment)
 
@@ -158,7 +157,8 @@ def media_generator():
                                          num_inference_steps=args.num_inference_steps,
                                          prompt_suffix=args.suffix, 
                                          width=args.image_size[0], 
-                                         height=args.image_size[1])
+                                         height=args.image_size[1],
+                                         n_prompt=args.n_prompt)
                     
                     #resize image to video size
                     image=image.resize(args.movie_size)
@@ -281,6 +281,10 @@ def get_media():
     new_clip=table.find_one(type=media_type,status='new',order_by='id')
     if new_clip:
         item = new_clip
+        if 'path' not in item:
+            print("THIS SHOULD NEVER HAPPEN!",item)
+            return '', 404
+
         #update status
         table.update(dict(type=media_type, path=item['path'], prompt=item['prompt'],status='old'),['type','path','prompt'])
         return jsonify({'path': item['path'], 'prompt': item['prompt']}), 200
@@ -425,9 +429,20 @@ if __name__ == '__main__':
     all_prompt_suppliments=[]
 
     for prompt_suppliment_file in args.prompt_suppliment_files:
-        with open(prompt_suppliment_file) as f:
-            prompt_suppliments=json.load(f)
-            all_prompt_suppliments.append(prompt_suppliments)
+
+        #if file is json
+        if prompt_suppliment_file.endswith(".json"):
+            with open(prompt_suppliment_file) as f:
+                prompt_suppliments=json.load(f)
+                all_prompt_suppliments.append(prompt_suppliments)
+        elif prompt_suppliment_file.endswith(".txt"):
+            with open(prompt_suppliment_file) as f:
+                prompt_suppliments={}
+                for line in f:
+                    line=line.strip()
+                    if line:
+                        prompt_suppliments[line]=1
+                all_prompt_suppliments.append(prompt_suppliments)
 
     if args.start_media_generation:
 

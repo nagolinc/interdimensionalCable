@@ -120,7 +120,7 @@ def setup(
     #ip_ckpt="D:\\img\\IP-Adapter\\IP-Adapter\\models\\wd15_ip_adapter_plus.bin",
     #ip_vae_model_path = "redstonehero/kl-f8-anime2"
     llm_model="D:\lmstudio\TheBloke\Mistral-7B-OpenOrca-GGUF\mistral-7b-openorca.Q5_K_M.gguf",
-    save_memory=True,
+    save_memory=False,
     need_txt2img=True,
     need_img2img=True,
     need_ipAdapter=True,
@@ -230,9 +230,12 @@ def setup(
             # pipe = pipe.to("cuda")
 
             # move pipe to CPU
-            pipe = pipe.to("cpu")
-            gc.collect()
-            torch.cuda.empty_cache()
+            if do_save_memory:
+                pipe = pipe.to("cpu")
+                gc.collect()
+                torch.cuda.empty_cache()
+            else:
+                pipe = pipe.to("cuda")
 
 
         if need_img2img:
@@ -569,6 +572,8 @@ def generate_image(prompt, prompt_suffix="", width=512, height=512,
             pipe = pipe.to("cpu")
             gc.collect()
             torch.cuda.empty_cache()
+        else:
+            pipe = pipe.to("cuda")
 
     # choose top scoring image
     image = images[0]
@@ -607,6 +612,8 @@ def upscale_image(image, prompt,
         img2img = img2img.to("cpu")
         gc.collect()
         torch.cuda.empty_cache()
+    else:
+        img2img = img2img.to("cuda")
 
     return img2
 
@@ -784,19 +791,21 @@ def text_completion(prompt,max_tokens=60,stop_tokens=["\n"]):
     # Send POST request
     response = requests.post(url, json=payload)
 
+    data = response.json()
     # Check if the request was successful
     if response.ok:
-        #print('Response:', response.json())
+        #print('Response:', data)
         pass
     else:
         print('Failed to get response. Status code:', response.status_code)
 
-    
+    outputTexts =[ data['text'][i][len(prompt):] for i in range(len(data['text']))]
+    #print(outputTexts)
 
-    outputText = response.json()['text'][0]#why does vllm have a different format?
+    #for some reason the last one is always the best (which explains why choosing the first one was so bad)
+    outputText = outputTexts[-1]
 
-    #apparently this includes our prompt, so trim it
-    outputText=outputText[len(prompt):]
+    print("\n\nOUTPUT TEXT:",outputText,"\n\n")
 
     return outputText
 
@@ -808,7 +817,7 @@ def create_prompt(prompts,max_tokens=60,prompt_hint="",prompt_suppliment=""):
         s+="DESCRIPTION:\n"+prompt+"\n"
     
     
-    s+="\n> MAKE SURE YOUR DESCRIPTION CONTAINS THE FOLLOWING WORDS: "+prompt_suppliment+"\n"
+    s+="\n> Write a 1-2 sentence description using the following words: "+prompt_suppliment+"\n"
 
     s+="DESCRIPTION:\n"
 
