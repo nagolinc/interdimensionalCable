@@ -95,13 +95,17 @@ def media_generator():
                     promptPersistence=args.prompt_persistence
                     # random_prompt = random.choice(sample_prompts)
                     # choose 5 random prompts from database
-                    statement = """
-                    SELECT * FROM media
-                    WHERE user_created=1
-                    ORDER BY RANDOM()
-                    LIMIT 5;        
-                    """
-                    gotPrompts = [x['prompt'] for x in db.query(statement)]
+                    count = table.count(type='prompt')
+                    if count >0:
+                        statement = """
+                        SELECT * FROM media
+                        WHERE user_created=1
+                        ORDER BY RANDOM()
+                        LIMIT 5;        
+                        """
+                        gotPrompts = [x['prompt'] for x in db.query(statement)]
+                    else:
+                        gotPrompts=[]
                     #fallback if there are no user created prompts
                     if len(gotPrompts)<5:
                         gotPrompts += sample_prompts
@@ -281,7 +285,7 @@ def get_media():
     new_clip=table.find_one(type=media_type,status='new',order_by='id')
     if new_clip:
         item = new_clip
-        if 'path' not in item:
+        if item is None or 'path' not in item:
             print("THIS SHOULD NEVER HAPPEN!",item)
             return '', 404
 
